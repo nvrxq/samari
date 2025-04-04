@@ -1,13 +1,14 @@
 import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
     EarlyStopping,
 )
 import logging
+import os
 
 # Assuming your model, dataset, and loss are in these locations
 from modeling.model import (
@@ -136,6 +137,7 @@ class TemporalFusionTrainer(pl.LightningModule):
 # --- Training Script ---
 if __name__ == "__main__":
     import yaml
+    import wandb
 
     args = parse_args()
     config = yaml.safe_load(open(args.config))
@@ -202,20 +204,36 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     early_stop_callback = EarlyStopping(
         monitor="val_loss",
-        patience=10,  # Stop after 10 epochs with no improvement
+        patience=train_config.get("early_stopping_patience", 10),
         verbose=True,
         mode="min",
     )
 
     # --- Logger ---
-    logger = TensorBoardLogger(train_config["log_dir"], name="temporal_fusion_model")
+    wandb_entity = os.getenv("WANDB_ENTITY")
+    wandb_project = os.getenv("WANDB_PROJECT", "temporal-fusion-model")
+
+    if not wandb_entity:
+        util_logger.warning("WANDB_ENTITY environment variable not set. Using default WandB behavior.")
+
+    logger = WandbLogger(
+        name=train_config.get("run_name", None),
+        project=wandb_project,
+        entity=wandb_entity,
+        log_model="all",
+        config=config,
+        save_dir=train_config["log_dir"]
+    )
+
     util_logger.info(
         f"""Your training setup:
                      Epochs: {train_config["max_epochs"]}
                      Learning Rate: {train_config["learning_rate"]}
                      Weight Decay: {train_config["weight_decay"]}
                      Dataset len: {len(train_dataset)}
-                     Model active params:{total_params / 1e6}M"""
+                     Model active params:{total_params / 1e6}M
+                     Logging to WANDB project: {wandb_project}"""
+                     + (f" entity: {wandb_entity}" if wandb_entity else "")
     )
     # --- Trainer ---
     trainer = pl.Trainer(
@@ -225,18 +243,21 @@ if __name__ == "__main__":
             train_config["strategy"]
             if torch.cuda.device_count() > 1 and train_config["accelerator"] == "gpu"
             else "auto"
-        ),  # Use DDP only if multiple GPUs
+        ),
         max_epochs=train_config["max_epochs"],
         logger=logger,
         callbacks=[checkpoint_callback, lr_monitor, early_stop_callback],
         precision=train_config["precision"],
-        log_every_n_steps=10,
+        log_every_n_steps=train_config.get("log_every_n_steps", 10),
         # Add other Trainer flags as needed (e.g., gradient_clip_val)
     )
 
     # --- Training ---
-    print("Starting training...")
-    trainer.fit(model, train_loader, val_loader)
+    print("Starting training with WandB logging...")
+    try:
+        trainer.fit(model, train_loader, val_loader)
+    finally:
+        wandb.finish()
 
     print("Training finished.")
     # Optionally run testing

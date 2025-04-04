@@ -20,6 +20,7 @@ train:
   loss_type: "smooth_l1"
   kf_loss_weight: 1.0
   mamba_loss_weight: 0.3
+  run_name: "SamariTinyLocal"
 
 model:
   encoder:
