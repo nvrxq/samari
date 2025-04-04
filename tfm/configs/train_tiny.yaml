@@ -1,13 +1,14 @@
 dataset:
-  frames_per_sample: 32
+  frames_per_sample: 1
   batch_size: 1
   num_workers: 1
   binary_task: true
-  train_data_dir: "datasets/sav_example"
-  val_data_dir: "datasets/sav_example"
+  train_data_dir: "./datasets/lasot"
+  val_data_dir: "./datasets/lasot"
+  max_frames: 4
 
 train:
-  learning_rate: 0.001
+  learning_rate: 0.00001
   weight_decay: 0.0001
   max_epochs: 10
   last_frame_loss_weight: 1.2
@@ -16,11 +17,13 @@ train:
   log_dir: "samari-tiny"
   accelerator: "gpu"
   devices: "-1"
+  loss_type: "smooth_l1"
+  kf_loss_weight: 1.0
+  mamba_loss_weight: 0.3
 
 model:
   encoder:
-    input_channels: 4 # 3 (RGB) + 1 (Mask)
-    skip_connections: true
+    input_channels: 3  # Just RGB
     channels:
       - 16
       - 32
@@ -32,7 +35,7 @@ model:
     strides:
       - [1, 1, 1]
       - [1, 1, 1]
-      - [1, 1, 1]
+      - [1, 1, 1]  # Keep T dimension
     paddings:
       - [1, 1, 1]
       - [1, 1, 1]
@@ -40,34 +43,16 @@ model:
     pool_kernels:
       - [1, 2, 2]
       - [1, 2, 2]
-      - [1, 2, 2]
+      - [1, 2, 2]  # Pool H, W
     pool_paddings:
       - [0, 0, 0]
       - [0, 0, 0]
       - [0, 0, 0]
-  transformer:
-    d_model: 64
-    nhead: 4
-    num_layers: 2
-    dropout: 0.1
-  decoder:
-    channels:
-      - 64
-      - 32
-      - 16
-    kernels:
-      - [3, 3, 3]
-      - [3, 3, 3]
-      - [3, 3, 3]
-    strides:
-      - [1, 2, 2]
-      - [1, 2, 2]
-      - [1, 2, 2]
-    paddings:
-      - [1, 1, 1]
-      - [1, 1, 1]
-      - [1, 1, 1]
-    output_paddings:
-      - [0, 1, 1]
-      - [0, 1, 1]
-      - [0, 1, 1]
+
+  mamba:
+    d_model: 128  # Dimension for Mamba layer
+    d_state: 16
+    d_conv: 4
+    expand: 2
+
+  bbox_embedding_dim: 64

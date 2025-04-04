@@ -8,12 +8,13 @@ from pytorch_lightning.callbacks import (
     EarlyStopping,
 )
 import logging
+
 # Assuming your model, dataset, and loss are in these locations
 from modeling.model import (
     TemporalFusionModule,
 )
-from dataset.sav_sync import SyncAVDataset
-from modeling.loss import weighted_bce_loss
+from dataset.lasot_dataset import LaSotDataset
+from modeling.loss import KalmanLoss
 import argparse
 
 
@@ -32,7 +33,9 @@ class TemporalFusionTrainer(pl.LightningModule):
         model_config,
         learning_rate=1e-4,
         weight_decay=1e-5,
-        last_frame_loss_weight=2.0,
+        loss_type: str = 'smooth_l1',
+        kf_loss_weight: float = 1.0,
+        mamba_loss_weight: float = 0.2
     ):
         super().__init__()
         self.save_hyperparameters()  # Saves args like learning_rate to hparams
@@ -40,57 +43,66 @@ class TemporalFusionTrainer(pl.LightningModule):
         self.model = TemporalFusionModule(model_config)
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        self.last_frame_loss_weight = last_frame_loss_weight
+        self.loss_fn = KalmanLoss(
+            kf_loss_weight=kf_loss_weight,
+            mamba_loss_weight=mamba_loss_weight,
+            loss_type=loss_type
+        )
 
-    def forward(self, frames, past_masks):
+    def forward(self, frames, target_bboxes):
+        # Pass arguments directly to the underlying model's forward
         # frames: (B, T, C, H, W)
-        # past_masks: (B, T-1, 1, H, W)
-        return self.model(frames, past_masks)
+        # target_bboxes: (B, T, 4)
+        return self.model(frames, target_bboxes)
 
     def _common_step(self, batch, batch_idx, stage):
-        frames = batch["frames"]
-        past_masks = batch["masks"]
-        target_masks = batch["label"]
-        # frames: (B, T, C, H, W)
-        # past_masks: (B, T-1, 1, H, W)
-        # target_masks: (B, 1, 1, H, W) - Assuming target is only the last frame mask
+        frames = batch["frames"]              # Shape: (B, T, C, H, W)
+        target_bboxes = batch["target_bboxes"] # Shape: (B, T, 4) - Normalized
 
-        # Model predicts masks for T-1 frames + the target frame
-        # Output shape: (B, T, 1, H, W)
-        predicted_masks = self(frames, past_masks)
-
-        # We need the ground truth for all predicted frames.
-        # Assuming the input `past_masks` are the ground truth for the first T-1 frames
-        # and `target_masks` is the ground truth for the T-th frame.
-        # Concatenate them to match the prediction shape.
-        all_target_masks = torch.cat(
-            [past_masks, target_masks], dim=1
-        )  # Shape: (B, T, 1, H, W)
+        # Model predicts KF outputs and Mamba measurements for all T frames
+        # Output shapes: (B, T, 4), (B, T, 4)
+        kf_predictions, mamba_measurements = self(frames, target_bboxes)
 
         # Ensure shapes match before loss calculation
-        if predicted_masks.shape != all_target_masks.shape:
+        if kf_predictions.shape != target_bboxes.shape:
             raise ValueError(
-                f"Shape mismatch: Predicted {predicted_masks.shape} vs Target {all_target_masks.shape}"
+                f"Shape mismatch KF: Predicted {kf_predictions.shape} vs Target {target_bboxes.shape}"
+            )
+        if mamba_measurements.shape != target_bboxes.shape:
+             raise ValueError(
+                 f"Shape mismatch Mamba: Predicted {mamba_measurements.shape} vs Target {target_bboxes.shape}"
+             )
+        if kf_predictions.shape[1] != frames.shape[1]: # Check T dimension consistency
+             raise ValueError(
+                f"Temporal dimension mismatch: Predicted T={kf_predictions.shape[1]} vs Input Frames T={frames.shape[1]}"
             )
 
-        loss = weighted_bce_loss(
-            predicted_masks,
-            all_target_masks,
-            last_frame_weight=self.last_frame_loss_weight,
+        # Calculate loss using KalmanLoss
+        loss, loss_stat = self.loss_fn(
+            kf_predictions,
+            mamba_measurements,
+            target_bboxes,
+            # last_frame_weight is handled inside KalmanLoss if needed,
+            # but current KalmanLoss doesn't use it.
         )
 
-        self.log(
-            f"{stage}_loss",
-            loss,
-            on_step=(stage == "train"),
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        # Add other metrics if needed (e.g., IoU, Dice)
-        # iou = calculate_iou(predicted_masks.sigmoid() > 0.5, all_target_masks > 0.5)
-        # self.log(f'{stage}_iou', iou, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        # Check for NaN loss
+        if torch.isnan(loss):
+            util_logger.error(f"NaN loss detected in {stage} step!")
+            # Potentially log inputs/outputs or raise an error for debugging
+            # For now, just log it. Consider stopping training if it persists.
+            # raise ValueError("NaN loss detected")
+
+        # Log individual loss components from KalmanLoss dictionary
+        self.log(f"{stage}_loss", loss_stat['total_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log(f"{stage}_loss_kf", loss_stat['loss_kf'], on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log(f"{stage}_loss_mamba", loss_stat['loss_mamba'], on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+
+        # Add other metrics if needed (e.g., IoU for the last frame)
+        # last_frame_pred = kf_predictions[:, -1, :]
+        # last_frame_target = target_bboxes[:, -1, :]
+        # iou = calculate_iou(last_frame_pred, last_frame_target) # Assuming calculate_iou exists
+        # self.log(f'{stage}_last_iou', iou, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -136,13 +148,17 @@ if __name__ == "__main__":
     # Consider using a standard PyTorch Dataset or ensuring thread/process safety.
     # For simplicity, using standard loading here. If AsyncAVDataset causes issues,
     # replace it with a simpler synchronous version for initial testing.
-    train_dataset = SyncAVDataset(
-        sav_dir=dataset_config["train_data_dir"],
-        frames_per_sample=dataset_config["frames_per_sample"],
+    train_dataset = LaSotDataset(
+        root_dir=dataset_config["train_data_dir"],
+        steps_per_epoch=train_config.get("steps_per_epoch", 1000), # Use config value or default
+        max_frames=dataset_config["max_frames"],
+        # transform=transform # Add transform if needed
     )
-    val_dataset = SyncAVDataset(
-        sav_dir=dataset_config["val_data_dir"],
-        frames_per_sample=dataset_config["frames_per_sample"],
+    val_dataset = LaSotDataset(
+        root_dir=dataset_config["val_data_dir"], # Use separate validation dir if available
+        steps_per_epoch=train_config.get("val_steps_per_epoch", 200), # Use config value or default
+        max_frames=dataset_config["max_frames"],
+        # transform=transform # Add transform if needed
     )
 
     # Important: shuffle=True for training, False for validation
@@ -169,7 +185,9 @@ if __name__ == "__main__":
         model_config=model_config,
         learning_rate=train_config["learning_rate"],
         weight_decay=train_config["weight_decay"],
-        last_frame_loss_weight=train_config["last_frame_loss_weight"],
+        loss_type=train_config.get("loss_type", "smooth_l1"),
+        kf_loss_weight=train_config.get("kf_loss_weight", 1.0),
+        mamba_loss_weight=train_config.get("mamba_loss_weight", 0.2),
     )
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -191,12 +209,14 @@ if __name__ == "__main__":
 
     # --- Logger ---
     logger = TensorBoardLogger(train_config["log_dir"], name="temporal_fusion_model")
-    util_logger.info(f"""Your training setup:
+    util_logger.info(
+        f"""Your training setup:
                      Epochs: {train_config["max_epochs"]}
                      Learning Rate: {train_config["learning_rate"]}
                      Weight Decay: {train_config["weight_decay"]}
                      Dataset len: {len(train_dataset)}
-                     Model active params:{total_params / 1e6}M""")
+                     Model active params:{total_params / 1e6}M"""
+    )
     # --- Trainer ---
     trainer = pl.Trainer(
         accelerator=train_config["accelerator"],
