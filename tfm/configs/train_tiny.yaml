@@ -12,7 +12,7 @@ train:
   weight_decay: 0.0001
   max_epochs: 10
   last_frame_loss_weight: 1.2
-  precision: "16-mixed"
+  precision: "float32" #float 32
   #strategy: "ddp"
   log_dir: "samari-tiny"
   accelerator: "gpu"

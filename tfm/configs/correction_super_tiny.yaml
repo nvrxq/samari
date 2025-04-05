@@ -1,0 +1,40 @@
+dataset:
+  frames_per_sample: 1
+  batch_size: 1
+  num_workers: 1
+  binary_task: true
+  train_data_dir: "./datasets/lasot"
+  val_data_dir: "./datasets/lasot"
+  max_frames: 4
+
+train:
+  learning_rate: 0.00001
+  weight_decay: 0.0001
+  max_epochs: 10
+  last_frame_loss_weight: 1.2
+  precision: "16-mixed"
+  #strategy: "ddp"
+  log_dir: "samari-tiny"
+  accelerator: "gpu"
+  devices: "-1"
+  run_name: "correction-super-tiny-local"
+  task_type: "correction"
+  log_images: true
+  log_interval: 10
+  lambda_kf: 0.1
+  lambda_motion: 0.4
+  lambda_struct: 0.3
+  lambda_temp: 0.5
+  adaptive_weighting: true
+  focal_gamma: 2.0
+  input_type: "bbox"
+
+
+model:
+  input_type: "bbox"
+  lambda_kf: 0.1
+  mamba_dim: 32
+  token_dim: 64
+  num_tokens: 8
+  state_dim: 4
+  hidden_dim: 64
