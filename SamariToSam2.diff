@@ -1,0 +1,314 @@
+--- sam2/sam2/modeling/sam2_base.py	2024-08-19 10:00:00.000000000 +0000
++++ sam2/sam2/modeling/sam2_base.py	2024-08-19 11:00:00.000000000 +0000
+@@ -10,6 +10,8 @@
+ from sam2.modeling.sam.transformer import TwoWayTransformer
+ from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
+ 
++from tfm.modeling.samari import LearnableKalmanTracker
++
+ # a large negative value as a placeholder score for missing objects
+ NO_OBJ_SCORE = -1024.0
+ 
+@@ -82,6 +84,12 @@
+         # extra arguments used to construct the SAM mask decoder; if not None, it should be a dict of kwargs to be passed into `MaskDecoder` class.
+         sam_mask_decoder_extra_args=None,
+         compile_image_encoder: bool = False,
++        # SAMARI settings
++        samari_mode: bool = False,
++        stable_frames_threshold: int = 15,
++        stable_ious_threshold: float = 0.3,
++        kf_score_weight: float = 0.15,
++
+     ):
+         super().__init__()
+ 
+@@ -161,6 +169,23 @@
+         self._build_sam_heads()
+         self.max_cond_frames_in_attn = max_cond_frames_in_attn
+ 
++        # SAMARI mode and tracker setup
++        self.samari_mode = samari_mode
++        self.stable_frames_threshold = stable_frames_threshold
++        self.stable_ious_threshold = stable_ious_threshold
++        self.kf_score_weight = kf_score_weight
++        
++        if self.samari_mode:
++            self.learnable_tracker = LearnableKalmanTracker(
++                state_dim=8,        # [x, y, w, h, vx, vy, vw, vh]
++                meas_dim=4,         # [x, y, w, h]
++                process_noise_scale=0.01,
++                measurement_noise_scale=0.1,
++                dropout_rate=0.1,
++                use_adaptive_noise=True,
++            )
++            self.learnable_tracker.eval()
++            # Инициализация для трекинга
++            self.trajectory_buffer = []
++            self.max_trajectory_len = 10
++            self.stable_frames = 0
++            self.frame_cnt = 0
++        
+         # Model compilation
+         if compile_image_encoder:
+@@ -211,7 +236,10 @@
+           - low_res_masks: [B, 1, H*4, W*4] shape, the best mask in `low_res_multimasks`.
+           If `multimask_output=True`, it's the mask with the highest IoU estimate.
+           If `multimask_output=False`, it's the same as `low_res_multimasks`.
+-        - high_res_masks: [B, 1, H*16, W*16] shape, the best mask in `high_res_multimasks`.
++        - high_res_masks: [B, 1, H*16, W*16] shape, the best mask in `high_res_multimasks`.
+           If `multimask_output=True`, it's the mask with the highest IoU estimate.
+           If `multimask_output=False`, it's the same as `high_res_multimasks`.
+         - obj_ptr: [B, C] shape, the object pointer vector for the output mask, extracted
+           based on the output token from the SAM mask decoder.
++        - object_score_logits: Score indicating the presence of an object.
++        - best_iou_score: Best IoU score among masks.
++        - kf_ious: IoU scores from Kalman Filter predictions (if available).
+         """
+         B = backbone_features.size(0)
+@@ -278,11 +296,173 @@
+             )
+ 
+         sam_output_token = sam_output_tokens[:, 0]
+-        if multimask_output:
+-            # take the best mask prediction (with the highest IoU estimation)
++        kf_ious = None
++        
++        if multimask_output and self.samari_mode:
++            batch_inds = torch.arange(B, device=device)
++            
++            # Извлекаем bbox из маски
++            def extract_bbox_from_mask(mask):
++                non_zero_indices = torch.argwhere(mask > 0.0)
++                if len(non_zero_indices) == 0:
++                    return [0, 0, 0, 0]
++                y_min, x_min = non_zero_indices.min(dim=0).values
++                y_max, x_max = non_zero_indices.max(dim=0).values
++                return [x_min.item(), y_min.item(), x_max.item() - x_min.item(), y_max.item() - y_min.item()]  # [x, y, w, h]
++            
++            # Инициализация трекера на первом кадре
++            if self.stable_frames == 0:
++                best_iou_inds = torch.argmax(ious, dim=-1)
++                low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
++                high_res_masks = high_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
++                
++                # Получаем bbox для измерения
++                bbox = extract_bbox_from_mask(high_res_masks[0][0])
++                measurement = torch.tensor([bbox], device=device).float()
++                
++                # Инициализируем трекер
++                self.learnable_tracker.reset()
++                self.trajectory_buffer = [measurement]
++                self.learnable_tracker(measurement)
++                
++                self.stable_frames += 1
++                self.frame_cnt += 1
++                
++                if sam_output_tokens.size(1) > 1:
++                    sam_output_token = sam_output_tokens[batch_inds, best_iou_inds]
++                    
++            # Период стабилизации трекера
++            elif self.stable_frames < self.stable_frames_threshold:
++                # Делаем предсказание для текущего шага
++                predicted_bbox = self.learnable_tracker.predict()
++                
++                # Выбираем лучшую маску по IoU
++                best_iou_inds = torch.argmax(ious, dim=-1)
++                low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
++                high_res_masks = high_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
++                
++                # Извлекаем bbox из текущей маски
++                bbox = extract_bbox_from_mask(high_res_masks[0][0])
++                measurement = torch.tensor([bbox], device=device).float()
++                
++                # Обновляем буфер траекторий
++                self.trajectory_buffer.append(measurement)
++                if len(self.trajectory_buffer) > self.max_trajectory_len:
++                    self.trajectory_buffer.pop(0)
++                
++                # Обновляем трекер, если IoU достаточно высокий
++                if ious[0][best_iou_inds] > self.stable_ious_threshold:
++                    self.learnable_tracker.update(measurement)
++                    self.stable_frames += 1
++                else:
++                    self.stable_frames = 0
++                
++                self.frame_cnt += 1
++                
++                if sam_output_tokens.size(1) > 1:
++                    sam_output_token = sam_output_tokens[batch_inds, best_iou_inds]
++                    
++            # Стабильное отслеживание с использованием предсказаний трекера
++            else:
++                # Предсказываем положение объекта
++                predicted_bbox = self.learnable_tracker.predict()
++                
++                # Извлекаем bbox-ы из всех возможных масок
++                high_res_multibboxes = []
++                for i in range(ious.shape[1]):
++                    bbox = extract_bbox_from_mask(high_res_multimasks[0, i])
++                    high_res_multibboxes.append(bbox)
++                
++                # Вычисляем IoU между предсказанным bbox и всеми возможными масками
++                kf_ious = []
++                for bbox in high_res_multibboxes:
++                    # Вычисляем IoU между предсказанным bbox и текущим bbox
++                    iou_val = self._compute_bbox_iou(predicted_bbox.cpu().tolist(), bbox)
++                    kf_ious.append(iou_val)
++                
++                kf_ious = torch.tensor(kf_ious, device=device)
++                
++                # Взвешенное комбинирование IoU для выбора лучшей маски
++                weighted_ious = self.kf_score_weight * kf_ious + (1 - self.kf_score_weight) * ious[0]
++                best_iou_inds = torch.argmax(weighted_ious, dim=-1)
++                
++                # Выбираем лучшую маску на основе взвешенного IoU
++                low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
++                high_res_masks = high_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
++                
++                # Извлекаем bbox из выбранной маски для обновления трекера
++                selected_bbox = high_res_multibboxes[best_iou_inds]
++                measurement = torch.tensor([selected_bbox], device=device).float()
++                
++                # Обновляем буфер траекторий
++                self.trajectory_buffer.append(measurement)
++                if len(self.trajectory_buffer) > self.max_trajectory_len:
++                    self.trajectory_buffer.pop(0)
++                
++                self.frame_cnt += 1
++                
++                # Обновляем трекер, если IoU достаточно высокий
++                if ious[0][best_iou_inds] > self.stable_ious_threshold:
++                    self.learnable_tracker.update(measurement)
++                else:
++                    self.stable_frames = 0
++                
++                if sam_output_tokens.size(1) > 1:
++                    sam_output_token = sam_output_tokens[batch_inds, best_iou_inds]
++                    
++        elif multimask_output:
++            # Стандартное поведение без SAMARI
+             best_iou_inds = torch.argmax(ious, dim=-1)
+             batch_inds = torch.arange(B, device=device)
+@@ -294,6 +474,12 @@
+         else:
+             low_res_masks, high_res_masks = low_res_multimasks, high_res_multimasks
+ 
++        # Подготовка значений для возврата
++        if isinstance(best_iou_inds, int):
++            best_iou_score = ious[0][best_iou_inds]
++        elif torch.is_tensor(best_iou_inds) and best_iou_inds.numel() > 0:
++            best_iou_score = ious[0][best_iou_inds[0]]
++        else:
++            best_iou_score = None
++            
++        best_kf_iou = None
++        if kf_ious is not None and torch.is_tensor(best_iou_inds) and best_iou_inds.numel() > 0:
++            best_kf_iou = kf_ious[best_iou_inds]
++
+         # Extract object pointer from the SAM output token (with occlusion handling)
+         obj_ptr = self.obj_ptr_proj(sam_output_token)
+         if self.pred_obj_scores:
+@@ -310,8 +496,11 @@
+             low_res_multimasks,
+             high_res_multimasks,
+             ious,
+             low_res_masks,
+-            high_res_masks,
+-            obj_ptr,
+-            object_score_logits,
++            high_res_masks,
++            obj_ptr,
++            object_score_logits,
++            best_iou_score,
++            best_kf_iou,
+         )
+ 
+@@ -367,11 +556,13 @@
+                 mask_inputs.size(0), self.hidden_dim, device=mask_inputs.device
+             )
+         else:
+             # produce an object pointer using the SAM decoder from the mask input
+-            _, _, _, _, _, obj_ptr, _ = self._forward_sam_heads(
++            _, _, _, _, _, obj_ptr, _, _, _ = self._forward_sam_heads(
+                 backbone_features=backbone_features,
+                 mask_inputs=self.mask_downsample(mask_inputs_float),
+                 high_res_features=high_res_features,
+             )
++ 
+@@ -386,8 +577,10 @@
+                 obj_ptr = obj_ptr + (1 - lambda_is_obj_appearing) * self.no_obj_ptr
+ 
+         return (
+-            low_res_masks,
+-            high_res_masks,
++            low_res_masks,
++            high_res_masks,
+             ious,
+             low_res_masks,
+             high_res_masks,
+@@ -397,6 +590,10 @@
+             obj_ptr,
+             object_score_logits,
++            ious[0][0],  # Лучший IoU (в данном случае всегда 1.0)
++            None,        # KF IoU (нет для маски ввода)
+         )
+ 
+@@ -747,6 +944,49 @@
+         pred_masks = torch.where(keep, pred_masks, torch.clamp(pred_masks, max=-10.0))
+         return pred_masks
+ 
++    def _compute_bbox_iou(self, bbox1, bbox2):
++        """
++        Вычисляет IoU между двумя ограничивающими рамками в формате [x, y, w, h]
++        """
++        # Преобразуем в формат координат углов
++        x1, y1, w1, h1 = bbox1
++        x2, y2, w2, h2 = bbox2
++        
++        # Координаты углов первого bbox
++        x1_1, y1_1 = x1, y1
++        x2_1, y2_1 = x1 + w1, y1 + h1
++        
++        # Координаты углов второго bbox
++        x1_2, y1_2 = x2, y2
++        x2_2, y2_2 = x2 + w2, y2 + h2
++        
++        # Вычисляем пересечение
++        x1_i = max(x1_1, x1_2)
++        y1_i = max(y1_1, y1_2)
++        x2_i = min(x2_1, x2_2)
++        y2_i = min(y2_1, y2_2)
++        
++        # Проверяем наличие пересечения
++        if x2_i <= x1_i or y2_i <= y1_i:
++            return 0.0
++        
++        # Вычисляем площади
++        area_i = (x2_i - x1_i) * (y2_i - y1_i)
++        area_1 = w1 * h1
++        area_2 = w2 * h2
++        
++        # Вычисляем IoU
++        iou = area_i / (area_1 + area_2 - area_i + 1e-6)  # Добавляем небольшое число для избежания деления на ноль
++        return iou
++
++
+@@ -797,6 +1037,8 @@
+             _,
+             low_res_masks,
+             high_res_masks,
+             obj_ptr,
+             object_score_logits,
++            best_iou_score,
++            kf_ious
+         ) = sam_outputs
+ 
+         current_out["pred_masks"] = low_res_masks
+         current_out["pred_masks_high_res"] = high_res_masks
+         current_out["obj_ptr"] = obj_ptr
++        current_out["best_iou_score"] = best_iou_score
++        current_out["kf_ious"] = kf_ious
+         if not self.training:
+             # Only add this in inference (to avoid unused param in activation checkpointing;
+             # it's mainly used in the demo to encode spatial memories w/ consolidated masks)
+             current_out["object_score_logits"] = object_score_logits 
