@@ -9,11 +9,7 @@
 
 ## 🖥 Demo
 
-<video width="1300" height="360" controls>
-  <source src="https://drive.google.com/file/d/1QET9HYezDVNEE8zuGYJckZu1LqMdCV84/view?usp=sharing" type="video/mp4">
-</video>
-</div>
-
+https://github.com/user-attachments/assets/e3132c7d-a864-4c6e-82c6-8c513ee5820d
 
 <div align="center">
 
