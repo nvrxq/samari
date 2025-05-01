@@ -11,6 +11,7 @@
 
 https://github.com/user-attachments/assets/e3132c7d-a864-4c6e-82c6-8c513ee5820d
 
+</div>
 <div align="center">
 
 ## 📌 Project Info
@@ -18,45 +19,43 @@ https://github.com/user-attachments/assets/e3132c7d-a864-4c6e-82c6-8c513ee5820d
 </div>
 
 **The final work of the 4th year of the HSE Bachelor's degree. Stable object tracker on video.We present a Zero-Shot filtering method for the SAM 2 model.** 
+**Links to contact the authors** : [Gleb Kirichenko](t.me/nvrxq), [Dmitriy Yurtov](t.me/dima11628)
 
-
-
-**Links to contact the authors** :
-- [Gleb Kirichenko](t.me/nvrxq)
-- [Dmitriy Yurtov](t.me/dima11628)
 <div align="center">
 
 ##  🔎 Experiments. (What worked, what didn't)
 </div>
 
--  [Dmitriy Yurtov](t.me/dima11628) : In the first iterations of the project, we wanted to speed up the Kalman filter, this was done to improve this filter not only for computer vision tasks. The Kalman filter code on the GPU is in `samari/experiments`. [✅]
+[Dmitriy Yurtov](t.me/dima11628) : In the first iterations of the project, we wanted to speed up the Kalman filter, this was done to improve this filter not only for computer vision tasks. The Kalman filter code on the GPU is in `samari/experiments`. [✅]
 
-- [Gleb Kirichenko](t.me/nvrxq): To improve the quality, inspired by the [MCMCDA](https://engineering.ucmerced.edu/sites/engineering.ucmerced.edu/files/page/documents/2008techreport-oh.pdf) article, we made a filter for the SAM 2 model based on this filter. The MCMCDA filter code is in `sam2/sam2/modeling/mcmcda_filter.py`[✅]
-- [Dmitriy Yurtov](t.me/dima11628): To speed up the MCMCDA tracker, we have also added several options such as :
+[Gleb Kirichenko](t.me/nvrxq): To improve the quality, inspired by the [MCMCDA](https://engineering.ucmerced.edu/sites/engineering.ucmerced.edu/files/page/documents/2008techreport-oh.pdf) article, we made a filter for the SAM 2 model based on this filter. The MCMCDA filter code is in `sam2/sam2/modeling/mcmcda_filter.py`[✅]
+
+[Dmitriy Yurtov](t.me/dima11628): To speed up the MCMCDA tracker, we have also added several options such as :
     - *num_mcmc_iterations* - **number of iterations for MCMC.**   [<span style="color: green;">Default = 1000</span>][✅]
     - *update_freq* - **track refresh rate (every N frames)** [<span style="color: green;">Default = 4</span>][✅]
-- [Gleb Kirichenko](t.me/nvrxq):A learnable Kalman filter, using various architectures. Either `boxes` or `images, boxes` is accepted as input.
+
+[Gleb Kirichenko](t.me/nvrxq):A learnable Kalman filter, using various architectures. Either `boxes` or `images, boxes` is accepted as input.
 <div align="center">
 
 ##  ⚙️ Setup
 </div>
-<div align="center">
-</div>
 
 **In order to test the filter along with SAM2 on your video, you need to take a few steps.**
-- **Downloading models**:
+
+**Downloading models**:
     `sh download_ckpt.sh`
-- **Install SAM2**:
+
+**Install SAM2**:
 ```
 cd sam2
 pip install -e .
 pip install -e ".[notebooks]"
 ```
-- **Run demo**
+**Run demo**
 ```
 python3 run_demo.py --video-input /PATH/TO/VIDEO --video_output /PATH/TO/SAVE --label-file
 ```
-- **Create Side-by-Side**
+**Create Side-by-Side**
 ```
 python3 create_sbs_video.py --sam2-result /PATH/TO/SAM2VIDEO --exp-result /PATH/TO/YOUR/EXP -exp-name
 ```
