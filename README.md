@@ -9,11 +9,11 @@
 
 ## 🖥 Demo
 
-<iframe src="https://drive.google.com/file/d/1QET9HYezDVNEE8zuGYJckZu1LqMdCV84/preview" 
-        width="640" 
-        height="480" 
-        allow="autoplay">
-</iframe>
+<video width="1300" height="360" controls>
+  <source src="https://drive.google.com/file/d/1QET9HYezDVNEE8zuGYJckZu1LqMdCV84/view?usp=sharing" type="video/mp4">
+</video>
+</div>
+
 
 <div align="center">
 
@@ -62,7 +62,7 @@ python3 run_demo.py --video-input /PATH/TO/VIDEO --video_output /PATH/TO/SAVE --
 ```
 - **Create Side-by-Side**
 ```
-python3 create_sbs_video.py --sam2-result /PATH/TO/SAM2VIDEO --exp-result /PATH/TO/YOUR/EXP -exp-name YOUR_EXP
+python3 create_sbs_video.py --sam2-result /PATH/TO/SAM2VIDEO --exp-result /PATH/TO/YOUR/EXP -exp-name
 ```
 <div align="center">
 
