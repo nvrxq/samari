@@ -9,11 +9,11 @@
 
 ## 🖥 Demo
 
-<video width="1300" height="360" controls>
-  <source src="./assets/demo.mp4" type="video/mp4">
-</video>
-</div>
-
+<iframe src="https://drive.google.com/file/d/1QET9HYezDVNEE8zuGYJckZu1LqMdCV84/preview" 
+        width="640" 
+        height="480" 
+        allow="autoplay">
+</iframe>
 
 <div align="center">
 
