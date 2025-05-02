@@ -5,13 +5,11 @@
 [Gleb Kirichenko](https://github.com/nvrxq), [Dmitriy Yurtov](https://github.com/Karniton) 
 </div>
 
-<div align="center">
 
 ## 🖥 Demo
 
 https://github.com/user-attachments/assets/e3132c7d-a864-4c6e-82c6-8c513ee5820d
 
-</div>
 
 ## 📌 Project Info
 **The final work of the 4th year of the HSE Bachelor's degree. Stable object tracker on video.We present a Zero-Shot filtering method for the SAM 2 model.** 
