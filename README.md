@@ -5,8 +5,9 @@
 [Gleb Kirichenko](https://github.com/nvrxq), [Dmitriy Yurtov](https://github.com/Karniton) 
 </div>
 
+---
 
-## 🖥 Demo
+
 
 https://github.com/user-attachments/assets/e3132c7d-a864-4c6e-82c6-8c513ee5820d
 
