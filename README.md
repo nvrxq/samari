@@ -21,8 +21,9 @@ https://github.com/user-attachments/assets/e3132c7d-a864-4c6e-82c6-8c513ee5820d
 [Gleb Kirichenko](t.me/nvrxq): To improve the quality, inspired by the [MCMCDA](https://engineering.ucmerced.edu/sites/engineering.ucmerced.edu/files/page/documents/2008techreport-oh.pdf) article, we made a filter for the SAM 2 model based on this filter. The MCMCDA filter code is in `sam2/sam2/modeling/mcmcda_filter.py`[✅]
 
 [Dmitriy Yurtov](t.me/dima11628): To speed up the MCMCDA tracker, we have also added several options such as :
-    - *num_mcmc_iterations* - **number of iterations for MCMC.**   [<span style="color: green;">Default = 1000</span>][✅]
-    - *update_freq* - **track refresh rate (every N frames)** [<span style="color: green;">Default = 4</span>][✅]
+
+- *num_mcmc_iterations* - **number of iterations for MCMC.**   [<span style="color: green;">Default = 1000</span>][✅]
+- *update_freq* - **track refresh rate (every N frames)** [<span style="color: green;">Default = 4</span>][✅]
 
 [Gleb Kirichenko](t.me/nvrxq):A learnable Kalman filter, using various architectures. Either `boxes` or `images, boxes` is accepted as input.
 ##  ⚙️ Setup
