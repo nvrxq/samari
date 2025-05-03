@@ -40,7 +40,7 @@ pip install -e ".[notebooks]"
 ```
 **Run demo**
 ```
-python3 run_demo.py --video-input /PATH/TO/VIDEO --video_output /PATH/TO/SAVE --label-file
+python3 run_demo.py --v /PATH/TO/VIDEO --o /PATH/TO/SAVE --label-file /PATH/TO/LABELS
 ```
 **Create Side-by-Side**
 ```
