@@ -1,0 +1,11 @@
+birth_rate: 0.01
+false_alarm_rate: 0.05
+disappearance_prob: 0.05
+detection_prob: 0.90
+num_mcmc_iterations: 1000
+temp_init: 10.0
+temp_final: 1.0
+iou_threshold: 0.3
+min_track_len: 3
+early_stopping_threshold: 0.01
+update_freq: 2

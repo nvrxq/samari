@@ -120,6 +120,7 @@ class SAM2Base(torch.nn.Module):
         min_track_len=3,
         early_stopping_threshold=0.01,
         update_freq=4,
+        min_obj_score_logits: float = -1,
     ):
         super().__init__()
 
@@ -213,6 +214,7 @@ class SAM2Base(torch.nn.Module):
         # Debug purpose
         self.history = {} # debug
         self.frame_cnt = 0 # debug
+        self.min_obj_score_logits = min_obj_score_logits
 
         
         if samari_tracker:
@@ -455,9 +457,7 @@ class SAM2Base(torch.nn.Module):
         kf_ious = None
         
         if multimask_output:
-            if self.tracking_mode == "mcmc" and self.samari_tracker:
-                # MCMC-based отслеживание
-                # Преобразуем маски в ограничивающие прямоугольники
+            if self.samari_tracker:
                 high_res_multibboxes = []
                 batch_inds = torch.arange(B, device=device)
                 for i in range(ious.shape[1]):
@@ -469,20 +469,17 @@ class SAM2Base(torch.nn.Module):
                     else:
                         high_res_multibboxes.append([0, 0, 0, 0])
                 
-                # Создаем наблюдения для MCMC
                 detections = []
                 for i, bbox in enumerate(high_res_multibboxes):
-                    if bbox != [0, 0, 0, 0]:  # Только валидные прямоугольники
+                    if bbox != [0, 0, 0, 0]:
                         detections.append({
                             'bbox': bbox,
                             'score': float(ious[0, i].item()),
                             'mask': high_res_multimasks[batch_inds, i].unsqueeze(1)[0][0].cpu().numpy(),
                         })
                 
-                # Обновляем трекер
                 self.mcmc.update_frame_observations(detections)
                 
-                # Берем лучшую маску на основе IoU
                 best_iou_inds = torch.argmax(ious, dim=-1)
                 batch_inds = torch.arange(B, device=device)
                 low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
