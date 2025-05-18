@@ -955,7 +955,7 @@ class SAM2VideoPredictor(SAM2Base):
         if maskmem_features is not None:
             maskmem_features = maskmem_features.to(torch.bfloat16)
             maskmem_features = maskmem_features.to(storage_device, non_blocking=True)
-        pred_masks_gpu = current_out["pred_masks"] # (B, 1, H, W)
+        pred_masks_gpu = current_out["pred_masks"]  # (B, 1, H, W)
         # potentially fill holes in the predicted masks
         if self.fill_hole_area > 0:
             pred_masks_gpu = fill_holes_in_mask_scores(
@@ -971,8 +971,8 @@ class SAM2VideoPredictor(SAM2Base):
         best_kf_score = current_out["kf_ious"]
         # make a compact version of this frame's output to reduce the state size
         compact_current_out = {
-            "maskmem_features": maskmem_features, # (B, C, H, W)
-            "maskmem_pos_enc": maskmem_pos_enc, 
+            "maskmem_features": maskmem_features,  # (B, C, H, W)
+            "maskmem_pos_enc": maskmem_pos_enc,
             "pred_masks": pred_masks,
             "obj_ptr": obj_ptr,
             "object_score_logits": object_score_logits,

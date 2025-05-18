@@ -33,6 +33,7 @@ Filter parameters:
 ----------------------------------------------------------------
 In order to change the parameters, change the filter config file and call the filter_from_confg method"""
 
+
 class SAM2Base(torch.nn.Module):
     def __init__(
         self,
@@ -212,11 +213,10 @@ class SAM2Base(torch.nn.Module):
         self.samari_tracker = samari_tracker
 
         # Debug purpose
-        self.history = {} # debug
-        self.frame_cnt = 0 # debug
+        self.history = {}  # debug
+        self.frame_cnt = 0  # debug
         self.min_obj_score_logits = min_obj_score_logits
 
-        
         if samari_tracker:
             self.mcmc = MCMCDA(
                 birth_rate=mcmc_birth_rate,
@@ -258,7 +258,7 @@ class SAM2Base(torch.nn.Module):
     @property
     def device(self):
         return next(self.parameters()).device
-    
+
     def filter_from_config(self, config: dict):
         if not isinstance(config, dict):
             raise ValueError("Config must be a dictionary")
@@ -455,45 +455,61 @@ class SAM2Base(torch.nn.Module):
 
         sam_output_token = sam_output_tokens[:, 0]
         kf_ious = None
-        
+
         if multimask_output:
             if self.samari_tracker:
                 high_res_multibboxes = []
                 batch_inds = torch.arange(B, device=device)
                 for i in range(ious.shape[1]):
-                    non_zero_indices = torch.nonzero(high_res_multimasks[batch_inds, i].unsqueeze(1)[0][0] > 0, as_tuple=False)
+                    non_zero_indices = torch.nonzero(
+                        high_res_multimasks[batch_inds, i].unsqueeze(1)[0][0] > 0,
+                        as_tuple=False,
+                    )
                     if len(non_zero_indices) > 0:
                         y_min, x_min = non_zero_indices.min(dim=0).values.cpu().numpy()
                         y_max, x_max = non_zero_indices.max(dim=0).values.cpu().numpy()
                         high_res_multibboxes.append([x_min, y_min, x_max, y_max])
                     else:
                         high_res_multibboxes.append([0, 0, 0, 0])
-                
+
                 detections = []
                 for i, bbox in enumerate(high_res_multibboxes):
                     if bbox != [0, 0, 0, 0]:
-                        detections.append({
-                            'bbox': bbox,
-                            'score': float(ious[0, i].item()),
-                            'mask': high_res_multimasks[batch_inds, i].unsqueeze(1)[0][0].cpu().numpy(),
-                        })
-                
+                        detections.append(
+                            {
+                                "bbox": bbox,
+                                "score": float(ious[0, i].item()),
+                                "mask": high_res_multimasks[batch_inds, i]
+                                .unsqueeze(1)[0][0]
+                                .cpu()
+                                .numpy(),
+                            }
+                        )
+
                 self.mcmc.update_frame_observations(detections)
-                
+
                 best_iou_inds = torch.argmax(ious, dim=-1)
                 batch_inds = torch.arange(B, device=device)
-                low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
-                high_res_masks = high_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
+                low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(
+                    1
+                )
+                high_res_masks = high_res_multimasks[
+                    batch_inds, best_iou_inds
+                ].unsqueeze(1)
                 if sam_output_tokens.size(1) > 1:
                     sam_output_token = sam_output_tokens[batch_inds, best_iou_inds]
-                
+
                 self.frame_cnt += 1
             else:
                 # take the best mask prediction (with the highest IoU estimation)
                 best_iou_inds = torch.argmax(ious, dim=-1)
                 batch_inds = torch.arange(B, device=device)
-                low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
-                high_res_masks = high_res_multimasks[batch_inds, best_iou_inds].unsqueeze(1)
+                low_res_masks = low_res_multimasks[batch_inds, best_iou_inds].unsqueeze(
+                    1
+                )
+                high_res_masks = high_res_multimasks[
+                    batch_inds, best_iou_inds
+                ].unsqueeze(1)
                 if sam_output_tokens.size(1) > 1:
                     sam_output_token = sam_output_tokens[batch_inds, best_iou_inds]
         else:
@@ -576,7 +592,7 @@ class SAM2Base(torch.nn.Module):
             obj_ptr,
             object_score_logits,
             1,
-            1
+            1,
         )
 
     def forward_image(self, img_batch: torch.Tensor):
@@ -655,32 +671,36 @@ class SAM2Base(torch.nn.Module):
             if self.samari_tracker:
                 valid_indices = []
                 tracks = self.mcmc.get_active_tracks()
-                
+
                 for track_id, track in tracks.items():
-                    if 'observations' in track:
-                        for obs in track['observations']:
-                            if 'frame_idx' in obs and obs['frame_idx'] < frame_idx:
-                                valid_indices.append(obs['frame_idx'])
-                
+                    if "observations" in track:
+                        for obs in track["observations"]:
+                            if "frame_idx" in obs and obs["frame_idx"] < frame_idx:
+                                valid_indices.append(obs["frame_idx"])
+
                 valid_indices = sorted(list(set(valid_indices)))
-                
+
                 if len(valid_indices) > self.max_obj_ptrs_in_encoder - 1:
-                    valid_indices = valid_indices[-(self.max_obj_ptrs_in_encoder - 1):]
-                
+                    valid_indices = valid_indices[-(self.max_obj_ptrs_in_encoder - 1) :]
+
                 if frame_idx - 1 not in valid_indices:
                     valid_indices.append(frame_idx - 1)
-                
+
                 for t_pos in range(1, self.num_maskmem):
                     idx = t_pos - self.num_maskmem
                     if idx < -len(valid_indices):
                         continue
-                    out = output_dict["non_cond_frame_outputs"].get(valid_indices[idx], None)
+                    out = output_dict["non_cond_frame_outputs"].get(
+                        valid_indices[idx], None
+                    )
                     if out is None:
                         out = unselected_cond_outputs.get(valid_indices[idx], None)
                     t_pos_and_prevs.append((t_pos, out))
             else:
                 for t_pos in range(1, self.num_maskmem):
-                    t_rel = self.num_maskmem - t_pos  # how many frames before current frame
+                    t_rel = (
+                        self.num_maskmem - t_pos
+                    )  # how many frames before current frame
                     if t_rel == 1:
                         # for t_rel == 1, we take the last frame (regardless of r)
                         if not track_in_reverse:
@@ -703,7 +723,9 @@ class SAM2Base(torch.nn.Module):
                             prev_frame_idx = -(-(frame_idx + 2) // stride) * stride
                             # then seek further among every r-th frames
                             prev_frame_idx = prev_frame_idx + (t_rel - 2) * stride
-                    out = output_dict["non_cond_frame_outputs"].get(prev_frame_idx, None)
+                    out = output_dict["non_cond_frame_outputs"].get(
+                        prev_frame_idx, None
+                    )
                     if out is None:
                         # If an unselected conditioning frame is among the last (self.num_maskmem - 1)
                         # frames, we still attend to it as if it's a non-conditioning frame.
@@ -996,7 +1018,7 @@ class SAM2Base(torch.nn.Module):
             obj_ptr,
             object_score_logits,
             best_iou_score,
-            kf_ious
+            kf_ious,
         ) = sam_outputs
 
         current_out["pred_masks"] = low_res_masks
