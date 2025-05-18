@@ -655,31 +655,24 @@ class SAM2Base(torch.nn.Module):
             # we take (self.num_maskmem - 2) frames among every stride-th frames plus the last frame.
             stride = 1 if self.training else self.memory_temporal_stride_for_eval
 
-            if self.tracking_mode == "mcmc" and self.samari_tracker:
-                # Используем историю треков из MCMC для выбора валидных индексов
+            if self.samari_tracker:
                 valid_indices = []
-                # Получаем текущие активные треки
                 tracks = self.mcmc.get_active_tracks()
                 
-                # Собираем индексы кадров из треков
                 for track_id, track in tracks.items():
                     if 'observations' in track:
                         for obs in track['observations']:
                             if 'frame_idx' in obs and obs['frame_idx'] < frame_idx:
                                 valid_indices.append(obs['frame_idx'])
                 
-                # Отбираем уникальные индексы и сортируем
                 valid_indices = sorted(list(set(valid_indices)))
                 
-                # Ограничиваем количество индексов
                 if len(valid_indices) > self.max_obj_ptrs_in_encoder - 1:
                     valid_indices = valid_indices[-(self.max_obj_ptrs_in_encoder - 1):]
                 
-                # Добавляем предыдущий кадр, если его нет
                 if frame_idx - 1 not in valid_indices:
                     valid_indices.append(frame_idx - 1)
                 
-                # Используем эти индексы для памяти
                 for t_pos in range(1, self.num_maskmem):
                     idx = t_pos - self.num_maskmem
                     if idx < -len(valid_indices):
