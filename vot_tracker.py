@@ -45,7 +45,7 @@ class SamariVotTracker:
         Args:
         - tracker_name (str): Name of the tracker to use
         """
-        self.checkpoint, self.model_cfg = get_cfg(tracker_name)
+        self.model_cfg, self.checkpoint = get_cfg(tracker_name)
 
         # Image preprocessing parameters
         self.input_image_size = 1024
