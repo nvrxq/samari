@@ -14,11 +14,11 @@ import os
 
 from pathlib import Path
 
-config_path = Path(__file__).parent / "dam4sam_config.yaml"
+config_path = "./filter.yaml"
 with open(config_path) as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 
-seed = config["seed"]
+seed = 222
 random.seed(seed)
 os.environ["PYTHONHASHSEED"] = str(seed)
 np.random.seed(seed)
@@ -28,7 +28,7 @@ torch.cuda.manual_seed(seed)
 
 def get_cfg(tracker_name):
     if tracker_name == "Samari-B":
-        return ("configs/sam2.1/sam2.1_hiera_b+.yaml", "sam2.1_hiera_b+_samari.pt")
+        return ("configs/sam2.1/sam2.1_hiera_b+.yaml", "sam2.1_hiera_base_plus.pt")
     elif tracker_name == "Samari-L":
         return ("configs/sam2.1/sam2.1_hiera_l.yaml", "sam2.1_hiera_l_samari.pt")
     elif tracker_name == "Samari-S":
@@ -76,7 +76,7 @@ class SamariVotTracker:
     def _prepare_image(self, img_pil):
         """Prepare image for input to SAM2."""
         img = torch.from_numpy(np.array(img_pil)).to(self.inference_state["device"])
-        img = img.permute(2, 0, 1).float() / 255.0
+        img = img.permute(2, 0, 1).float() / 255.0  # Convert to CHW format and normalize
         img = F.resize(img, (self.input_image_size, self.input_image_size))
         img = (img - self.img_mean) / self.img_std
         return img
@@ -96,6 +96,23 @@ class SamariVotTracker:
             "cond_frame_outputs": {},
             "non_cond_frame_outputs": {},
         }
+        
+        # Add these required fields
+        inference_state["point_inputs_per_obj"] = {}
+        inference_state["mask_inputs_per_obj"] = {}
+        inference_state["output_dict_per_obj"] = {}
+        inference_state["temp_output_dict_per_obj"] = {}
+        inference_state["obj_ids"] = []
+        inference_state["obj_id_to_idx"] = {}
+        inference_state["obj_idx_to_id"] = {}
+        inference_state["frames_already_tracked"] = {}
+        inference_state["tracking_has_started"] = False
+        inference_state["consolidated_frame_inds"] = {
+            "cond_frame_outputs": set(),
+            "non_cond_frame_outputs": set(),
+        }
+        inference_state["cached_features"] = {}
+        inference_state["constants"] = {}
 
         self.img_mean = self.img_mean.to(compute_device)
         self.img_std = self.img_std.to(compute_device)
@@ -160,7 +177,7 @@ class SamariVotTracker:
         - out_dict (dict): Dictionary containing predicted mask.
         """
         torch.cuda.empty_cache()
-        prepared_img = self._prepare_image(image).unsqueeze(0)
+        prepared_img = self._prepare_image(image)
         if not init:
             self.frame_index += 1
             self.inference_state["num_frames"] += 1
@@ -170,7 +187,6 @@ class SamariVotTracker:
             self.inference_state,
             start_frame_idx=self.frame_index,
             max_frame_num_to_track=0,
-            return_all_masks=True,
         ):
             if len(out) == 3:
                 _, _, out_mask_logits = out
