@@ -125,46 +125,57 @@ class SamariVotTracker:
     def initialize(self, image, init_mask, bbox=None):
         """
         Initialize the tracker with the first frame and mask.
+        Function builds the DAM4SAM (2.1) tracker and initializes it with the first frame and mask.
 
         Args:
         - image (PIL Image): First frame of the video.
-        - init_mask (numpy array): Binary mask for initialization
-        - bbox (list): Optional bounding box for initialization
-
+        - init_mask (numpy array): Binary mask for the initialization
+        
         Returns:
-        - out_dict (dict): Dictionary containing the mask for initialization frame.
+        - out_dict (dict): Dictionary containing the mask for the initialization frame.
         """
-        if type(init_mask) is list:
-            init_mask = init_mask[0]
-        self.frame_index = 0
-
-        self.img_width = image.width
-        self.img_height = image.height
+        self.frame_index = 0 # Current frame index, updated frame-by-frame
+        self.object_sizes = [] # List to store object sizes (number of pixels) 
+        self.last_added = -1 # Frame index of the last added frame into DRM memory
+        
+        self.img_width = image.width # Original image width
+        self.img_height = image.height # Original image height
         self.inference_state = self.init_state_tw()
-        video_width, video_height = image.size
+        self.inference_state["images"] = image
+        video_width, video_height = image.size 
         self.inference_state["video_height"] = video_height
-        self.inference_state["video_width"] = video_width
+        self.inference_state["video_width"] =  video_width
         prepared_img = self._prepare_image(image)
-        self.inference_state["images"] = {0: prepared_img}
+        self.inference_state["images"] = {0 : prepared_img}
         self.inference_state["num_frames"] = 1
         self.predictor.reset_state(self.inference_state)
 
-        if init_mask is None and bbox is not None:
+        # warm up the model
+        self.predictor._get_image_feature(self.inference_state, frame_idx=0, batch_size=1)
+        result = []
+        if init_mask is None:
+            if bbox is None:
+                print('Error: initialization state (bbox or mask) is not given.')
+                exit(-1)
+            
+            # consider bbox initialization - estimate init mask from bbox first
             init_mask = self.estimate_mask_from_box(bbox)
-        elif init_mask is None and bbox is None:
-            raise ValueError("Error: initialization state (bbox or mask) is not given.")
 
-        _, _, out_mask_logits = self.predictor.add_new_mask(
-            inference_state=self.inference_state,
-            frame_idx=0,
-            obj_id=0,
-            mask=init_mask,
-        )
-
-        m = (out_mask_logits[0, 0] > 0).float().cpu().numpy().astype(np.uint8)
+        for id, m in enumerate(init_mask):
+            with open(f"/home/never/samari/VOT/mask.txt", "a") as f:
+                f.write(str(m.shape) + " Msk shape \n")
+            _, _, out_mask_logits = self.predictor.add_new_mask(
+                inference_state=self.inference_state,
+                frame_idx=0,
+                obj_id=id,
+                mask=m,
+            )   
+            m = (out_mask_logits[0, 0] > 0).float().cpu().numpy().astype(np.uint8)
+            result.append(m)
         self.inference_state["images"].pop(self.frame_index)
 
-        return {"pred_mask": m}
+        out_dict = {'pred_mask': result}
+        return out_dict
 
     @torch.inference_mode()
     def track(self, image, init=False):
@@ -184,7 +195,7 @@ class SamariVotTracker:
             self.frame_index += 1
             self.inference_state["num_frames"] += 1
         self.inference_state["images"][self.frame_index] = prepared_img
-
+        result = []
         for out in self.predictor.propagate_in_video(
             self.inference_state,
             start_frame_idx=self.frame_index,
@@ -194,10 +205,14 @@ class SamariVotTracker:
                 _, _, out_mask_logits = out
             else:
                 _, _, out_mask_logits, _ = out
-
-            m = (out_mask_logits[0][0] > 0.0).float().cpu().numpy().astype(np.uint8)
+            with open(f"/home/never/samari/VOT/mask.txt", "a") as f:
+                f.write(str(out_mask_logits.shape) + "\n")
+            for obj in range(len(out_mask_logits)):
+                m = (out_mask_logits[obj][0] > 0.0).float().cpu().numpy().astype(np.uint8)
+                assert m.shape == (self.img_height, self.img_width)
+                result.append(m)
             self.inference_state["images"].pop(self.frame_index)
-            return {"pred_mask": m}
+            return {"pred_mask": result}
 
     def estimate_mask_from_box(self, bbox):
         """
