@@ -14,7 +14,7 @@ import os
 
 from pathlib import Path
 
-config_path = "./filter.yaml"
+config_path = "/home/never/samari/VOT/filter.yaml"
 with open(config_path) as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -30,9 +30,11 @@ def get_cfg(tracker_name):
     if tracker_name == "Samari-B":
         return ("configs/sam2.1/sam2.1_hiera_b+.yaml", "sam2.1_hiera_base_plus.pt")
     elif tracker_name == "Samari-L":
-        return ("configs/sam2.1/sam2.1_hiera_l.yaml", "sam2.1_hiera_l_samari.pt")
+        return ("configs/sam2.1/sam2.1_hiera_l.yaml", "/home/never/samari/VOT/sam2.1_hiera_large.pt")
     elif tracker_name == "Samari-S":
         return ("configs/sam2.1/sam2.1_hiera_s.yaml", "sam2.1_hiera_s_samari.pt")
+    elif tracker_name == "Samari-T":
+        return ("configs/sam2.1/sam2.1_hiera_t.yaml", "/home/never/samari/VOT/sam2.1_hiera_tiny.pt")
     else:
         raise ValueError(f"Invalid tracker name: {tracker_name}")
 

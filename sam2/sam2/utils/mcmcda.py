@@ -1,4 +1,5 @@
 import numpy as np
+from math import factorial
 
 
 class MCMCDA:
@@ -318,7 +319,7 @@ class MCMCDA:
                         )
                     else:
                         self._factorial_cache[counts["mu_t"]] = np.log(
-                            np.math.factorial(counts["mu_t"])
+                            factorial(counts["mu_t"])
                         )
 
                 log_prior -= self._factorial_cache[counts["mu_t"]]
